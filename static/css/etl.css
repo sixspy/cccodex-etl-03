@@ -130,3 +130,74 @@ button.ghost {
 .kv { margin: 0.35rem 0; }
 .kv b { display: inline-block; min-width: 5.5rem; color: var(--muted); font-weight: 600; }
 .empty { color: var(--muted); padding: 1rem 0; }
+
+/* 配额看板：横排可读 */
+.quota-board { margin-bottom: 1rem; }
+.quota-board .day { font-size: 0.85rem; font-weight: 400; margin-left: 0.5rem; }
+.stat-strip {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.8rem;
+}
+.stat {
+  flex: 1 1 7rem;
+  background: #ffeeda;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.stat b { font-size: 1.25rem; color: var(--accent); }
+.stat span { color: var(--muted); font-size: 0.82rem; }
+.qtable { border-top: 1px solid var(--line); }
+.qrow {
+  display: grid;
+  grid-template-columns: 1.5fr 1.1fr 0.6fr 0.8fr 0.6fr 0.6fr 1.6fr;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.45rem 0.45rem;
+  border-bottom: 1px dashed var(--line);
+  cursor: pointer;
+}
+.qrow:hover { background: #ffeeda; }
+.qrow.active { background: #ffd9b8; }
+.qrow.qhead {
+  cursor: default;
+  color: var(--muted);
+  font-size: 0.8rem;
+  border-bottom: 1px solid var(--line);
+}
+.qrow.qhead:hover { background: transparent; }
+.qrow .path { font-size: 0.82rem; color: var(--muted); }
+
+/* 右栏：落库详情 + 超额设置 */
+.side { display: grid; gap: 1rem; align-content: start; }
+.panel h3 {
+  margin: 0.9rem 0 0.4rem;
+  font-size: 0.92rem;
+  border-top: 1px dashed var(--line);
+  padding-top: 0.7rem;
+}
+.panel h3 .muted { font-weight: 400; font-size: 0.8rem; }
+.mini-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.3rem 0.2rem;
+  font-size: 0.85rem;
+  border-bottom: 1px dotted var(--line);
+}
+.quota-line { font-size: 0.8rem; color: var(--accent); margin-top: 0.15rem; }
+.fld { display: block; margin-bottom: 0.6rem; font-size: 0.9rem; }
+.fld input { max-width: 10rem; }
+.radio {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.9rem;
+}
+.radio input { width: auto; margin: 0; }

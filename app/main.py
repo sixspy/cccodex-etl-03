@@ -1,13 +1,23 @@
-import os
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, URLSafeSerializer
 
 from app.config import Config
-from app.db import get_db, get_pipeline, init_db, list_pipelines, run_extract, run_load
+from app.db import (
+    BizError,
+    continue_candidates,
+    get_db,
+    get_pipeline,
+    init_db,
+    list_pipelines,
+    quota_board,
+    run_extract,
+    run_load,
+    set_quota,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static"
@@ -33,6 +43,12 @@ def require_user(request: Request) -> str:
     if user != Config.ADMIN_USER:
         raise HTTPException(status_code=401, detail="未登录")
     return user
+
+
+def _found(item: dict | None) -> dict:
+    if not item:
+        raise HTTPException(status_code=404, detail="管道不存在")
+    return item
 
 
 @app.on_event("startup")
@@ -94,31 +110,66 @@ def api_pipelines(user: str = Depends(require_user)):
         return {"items": list_pipelines(conn)}
 
 
+@app.get("/api/quota/board")
+def api_quota_board(user: str = Depends(require_user)):
+    with get_db() as conn:
+        return quota_board(conn)
+
+
 @app.get("/api/pipelines/{pipeline_id}")
 def api_pipeline_detail(pipeline_id: int, user: str = Depends(require_user)):
     with get_db() as conn:
-        item = get_pipeline(conn, pipeline_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="管道不存在")
-    return item
+        return _found(get_pipeline(conn, pipeline_id))
 
 
 @app.post("/api/pipelines/{pipeline_id}/extract")
 def api_extract(pipeline_id: int, user: str = Depends(require_user)):
     with get_db() as conn:
-        item = run_extract(conn, pipeline_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="管道不存在")
-    return item
+        return _found(run_extract(conn, pipeline_id))
 
 
 @app.post("/api/pipelines/{pipeline_id}/load")
-def api_load(pipeline_id: int, user: str = Depends(require_user)):
+def api_load(
+    pipeline_id: int,
+    body: dict | None = Body(None),
+    user: str = Depends(require_user),
+):
+    requested_path = (body or {}).get("overflow_path")
     with get_db() as conn:
-        item = run_load(conn, pipeline_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="管道不存在")
-    return item
+        try:
+            item = run_load(conn, pipeline_id, requested_path)
+        except BizError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    return _found(item)
+
+
+@app.post("/api/pipelines/{pipeline_id}/quota")
+def api_set_quota(
+    pipeline_id: int,
+    body: dict = Body(...),
+    user: str = Depends(require_user),
+):
+    with get_db() as conn:
+        try:
+            item = set_quota(
+                conn,
+                pipeline_id,
+                daily_quota=body.get("daily_quota"),
+                overflow_path=body.get("overflow_path"),
+            )
+        except BizError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    return _found(item)
+
+
+@app.post("/api/pipelines/{pipeline_id}/candidates/continue")
+def api_continue_candidates(pipeline_id: int, user: str = Depends(require_user)):
+    with get_db() as conn:
+        try:
+            item = continue_candidates(conn, pipeline_id)
+        except BizError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    return _found(item)
 
 
 def create_app() -> FastAPI:

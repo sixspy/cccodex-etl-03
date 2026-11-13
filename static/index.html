@@ -14,10 +14,45 @@
       <span class="who">{{ me }}</span>
       <button class="ghost" @click="logout">退出</button>
     </header>
-    <p class="muted">基线能力：管道列表、抽取、落库。后续题面在此叠加增量水位、清洗规则、并发争用等。</p>
+    <p class="muted">
+      按日管道配额：配额看板、管道总览、落库详情、超额设置四处联动。配额扣减在服务端记账，
+      超额路径只能选一种写进说明，当日禁止改口；候补池过了日期边界后点继续，按新日配额重算。
+    </p>
+
+    <section class="panel quota-board">
+      <h2>配额看板 <span class="muted day">结算日 {{ board.settle_day }}</span></h2>
+      <div class="stat-strip">
+        <div class="stat"><b>{{ board.totals.pipelines ?? 0 }}</b><span>管道</span></div>
+        <div class="stat"><b>{{ board.totals.quota ?? 0 }}</b><span>配额总量</span></div>
+        <div class="stat"><b>{{ board.totals.loaded ?? 0 }}</b><span>今日已落</span></div>
+        <div class="stat"><b>{{ board.totals.candidate_rows ?? 0 }}</b><span>候补条数</span></div>
+      </div>
+      <div class="qtable">
+        <div class="qrow qhead">
+          <span>管道</span><span>状态</span><span>配额</span><span>今日已落</span>
+          <span>剩余</span><span>候补</span><span>超额路径</span>
+        </div>
+        <div
+          v-for="q in board.items"
+          :key="q.id"
+          class="qrow"
+          :class="{ active: current && current.id === q.id }"
+          @click="open(q.id)"
+        >
+          <span>{{ q.title }}</span>
+          <span><span class="tag" :class="tagClass(q.status)">{{ q.status }}</span></span>
+          <span>{{ q.daily_quota }}</span>
+          <span>{{ q.today_loaded }}</span>
+          <span>{{ q.remaining }}</span>
+          <span>{{ q.candidates_pending_rows }}</span>
+          <span class="path">{{ q.overflow_path_name }}</span>
+        </div>
+      </div>
+    </section>
+
     <div class="board">
       <section class="panel">
-        <h2>管道列表</h2>
+        <h2>管道总览</h2>
         <div v-if="!items.length" class="empty">暂无管道</div>
         <div
           v-for="p in items"
@@ -29,27 +64,94 @@
           <div>
             <div>{{ p.title }}</div>
             <div class="code">{{ p.code }} · {{ p.source_uri }}</div>
+            <div class="quota-line">
+              配额 {{ p.daily_quota }} · 今日已落 {{ p.today_loaded }} ·
+              候补 {{ p.candidates_pending_rows }} 条 · {{ p.overflow_path_name }}
+            </div>
           </div>
           <span class="tag" :class="tagClass(p.status)">{{ p.status }}</span>
         </div>
       </section>
-      <section class="panel">
-        <h2>管道详情</h2>
-        <div v-if="!current" class="empty">点左侧一条查看抽取与落库状态</div>
-        <template v-else>
-          <p class="kv"><b>题名</b>{{ current.title }}</p>
-          <p class="kv"><b>编码</b><span class="code">{{ current.code }}</span></p>
-          <p class="kv"><b>源地址</b><span class="code">{{ current.source_uri }}</span></p>
-          <p class="kv"><b>状态</b><span class="tag" :class="tagClass(current.status)">{{ current.status }}</span></p>
-          <p class="kv"><b>已抽取</b>{{ current.extracted }}</p>
-          <p class="kv"><b>已落库</b>{{ current.loaded }}</p>
-          <div class="actions">
-            <button @click="extract" :disabled="busy">执行抽取</button>
-            <button class="ghost" @click="load" :disabled="busy">执行落库</button>
-          </div>
-          <p v-if="msg" class="muted">{{ msg }}</p>
-        </template>
-      </section>
+
+      <div class="side">
+        <section class="panel">
+          <h2>落库详情</h2>
+          <div v-if="!current" class="empty">点左侧一条查看抽取与落库状态</div>
+          <template v-else>
+            <p class="kv"><b>题名</b>{{ current.title }}</p>
+            <p class="kv"><b>编码</b><span class="code">{{ current.code }}</span></p>
+            <p class="kv"><b>源地址</b><span class="code">{{ current.source_uri }}</span></p>
+            <p class="kv"><b>状态</b><span class="tag" :class="tagClass(current.status)">{{ current.status }}</span></p>
+            <p class="kv"><b>已抽取</b>{{ current.extracted }}</p>
+            <p class="kv"><b>本轮已落</b>{{ current.loaded }}</p>
+            <p class="kv"><b>配额</b>{{ current.daily_quota }}（今日已落 {{ current.today_loaded }} · 剩余 {{ current.remaining }}）</p>
+            <p class="kv"><b>超额路径</b>{{ current.overflow_path_name }}</p>
+
+            <h3>候补队列 <span class="muted">共 {{ current.candidates_pending_rows }} 条</span></h3>
+            <div v-if="!current.candidates.length" class="empty">暂无候补</div>
+            <div v-for="c in current.candidates" :key="c.id" class="mini-row">
+              <span>#{{ c.seq }} · {{ c.rows_pending }} 条 · {{ c.created_day }} 入账</span>
+              <span class="tag" :class="c.status === 'done' ? 'ok' : 'warn'">
+                {{ c.status === 'done' ? '已落' : '候补中' }}
+              </span>
+            </div>
+
+            <h3>配额抢占记录</h3>
+            <div v-if="!current.events.length" class="empty">暂无记录</div>
+            <div v-for="e in current.events" :key="e.id" class="mini-row">
+              <span>{{ e.created_at.slice(5, 16) }} · {{ e.kind }} {{ e.amount }} 条</span>
+              <span class="muted" v-if="e.remaining_after !== null">剩余 {{ e.remaining_after }}</span>
+            </div>
+
+            <div class="actions">
+              <button @click="extract" :disabled="busy">执行抽取</button>
+              <button class="ghost" @click="load" :disabled="busy">执行落库</button>
+              <button class="ghost" @click="continuePool" :disabled="busy || !canContinue">
+                候补继续
+              </button>
+            </div>
+            <p v-if="msg" class="muted">{{ msg }}</p>
+          </template>
+        </section>
+
+        <section class="panel">
+          <h2>超额设置</h2>
+          <div v-if="!current" class="empty">先选一条管道</div>
+          <template v-else>
+            <p class="muted">
+              配额按日结算（结算日 {{ board.settle_day }}）。超额路径只能选一种写进说明，
+              当日禁止改口。
+            </p>
+            <label class="fld">
+              日配额
+              <input type="number" min="0" v-model.number="settings.daily_quota" />
+            </label>
+            <label class="radio">
+              <input
+                type="radio" value="pool"
+                v-model="settings.overflow_path"
+                :disabled="pathLocked && current.overflow_path !== 'pool'"
+              />
+              超额进候补池，留到次日再落
+            </label>
+            <label class="radio">
+              <input
+                type="radio" value="fail"
+                v-model="settings.overflow_path"
+                :disabled="pathLocked && current.overflow_path !== 'fail'"
+              />
+              超额当场失败，写配额已满
+            </label>
+            <p v-if="pathLocked" class="muted">
+              当日禁止改口：路径已定为「{{ current.overflow_path_name }}」，次日可改。
+            </p>
+            <div class="actions">
+              <button @click="saveSettings" :disabled="busy">保存设置</button>
+            </div>
+            <p v-if="settingsMsg" class="muted">{{ settingsMsg }}</p>
+          </template>
+        </section>
+      </div>
     </div>
   </div>
   <script src="/static/js/app.js"></script>
